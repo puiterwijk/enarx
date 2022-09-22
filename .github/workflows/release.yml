@@ -309,6 +309,46 @@ jobs:
         path: dpkg.deb
         if-no-files-found: error
 
+  push-oci:
+    needs: [ build-x86_64, test-bin, test-oci ]
+    permissions:
+      packages: write
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v3
+    - id: version
+      run: echo "::set-output name=version::$(cargo metadata --format-version=1 --no-deps | jq '.packages[] | select(.name == "enarx") | .version' --raw-output)"
+    - uses: actions/download-artifact@v3
+      with:
+        name: enarx-x86_64-unknown-linux-musl-oci
+    - name: create podman multi-arch manifest
+      run: |
+        podman manifest create --all "ghcr.io/enarx/enarx:v${{ steps.version.outputs.version }}" \
+        docker-archive:enarx-x86_64-unknown-linux-musl-oci
+
+    - name: Login to GitHub Container Registry
+      if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Login to Docker Hub
+      if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
+      uses: docker/login-action@v2
+      with:
+        registry: docker.io
+        username: ${{ secrets.DOCKER_HUB_USERNAME }}
+        password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+    - name: Push to GitHub Container Registry
+      if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
+      run: podman push "localhost/enarx:v${{ steps.version.outputs.version }}" "ghcr.io/enarx/enarx:v${{ steps.version.outputs.version }}"
+    - name: Push to Docker Hub
+      if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
+      run: podman push "localhost/enarx:v${{ steps.version.outputs.version }}" "docker.io/enarx/enarx:v${{ steps.version.outputs.version }}"
+
+
   release:
     if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
     needs: [ build-x86_64, test-bin, test-oci, test-windows, build-rpm, build-deb ]
